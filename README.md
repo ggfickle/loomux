@@ -1,4 +1,4 @@
-# Tmux Workspace Visualizer
+# Loomux
 
 A lightweight Tauri desktop app for viewing and managing local tmux sessions, with macOS Terminal.app opening support.
 
@@ -64,6 +64,21 @@ npm run tauri dev
 ```
 
 On Linux, tmux session listing and create/rename/delete flows work. The **Open in Terminal** action intentionally returns an unsupported-platform error because Terminal.app automation is macOS-only.
+
+### tmux binary detection
+
+The app now tries to find `tmux` in this order:
+
+1. `TMUX_BINARY_PATH` environment variable
+2. `tmux` from `PATH`
+3. Common macOS paths:
+   - `/opt/homebrew/bin/tmux`
+   - `/usr/local/bin/tmux`
+   - `/usr/bin/tmux`
+   - `/bin/tmux`
+   - `/opt/local/bin/tmux`
+
+This matters on macOS because GUI apps launched from Finder often do not inherit the same `PATH` as Terminal. The detected path is shown in the UI.
 
 ### Build the frontend
 

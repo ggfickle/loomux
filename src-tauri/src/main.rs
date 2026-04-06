@@ -29,7 +29,8 @@ fn open_tmux_session(session_name: String) -> Result<(), String> {
         return Err("session name cannot be empty".to_string());
     }
 
-    macos::open_session_in_terminal(&session_name)
+    let tmux_binary = tmux::tmux_binary_for_open()?;
+    macos::open_session_in_terminal(&tmux_binary, &session_name)
 }
 
 fn main() {

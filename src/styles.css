@@ -41,7 +41,11 @@ button {
 .app-shell {
   max-width: 980px;
   margin: 0 auto;
-  padding: 56px 24px 72px;
+  padding: 24px 24px 72px;
+}
+
+.window-chrome-spacer {
+  height: 18px;
 }
 
 .hero {

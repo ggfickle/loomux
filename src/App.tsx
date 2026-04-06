@@ -11,6 +11,7 @@ import type { TmuxOverview } from "./types";
 const emptyOverview: TmuxOverview = {
   sessionCount: 0,
   tmuxProcessCount: 0,
+  tmuxBinaryPath: "",
   sessions: [],
 };
 
@@ -161,12 +162,13 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      <div className="window-chrome-spacer" aria-hidden="true" />
       <section className="hero">
         <div>
-          <p className="eyebrow">Tmux Workspace Visualizer</p>
-          <h1>Manage local tmux sessions from one simple desktop view.</h1>
+          <p className="eyebrow">Loomux</p>
+          <h1>Manage local tmux sessions from a cleaner macOS desktop view.</h1>
           <p className="subtitle">
-            Create, rename, delete, refresh, and open sessions with a macOS-friendly Tauri app.
+            Create, rename, delete, refresh, and open tmux sessions in a cleaner native-feeling macOS app.
           </p>
         </div>
         <button
@@ -206,6 +208,10 @@ export default function App() {
           </button>
         </form>
       </section>
+
+      {!loading && overview.tmuxBinaryPath ? (
+        <div className="banner">Resolved tmux binary: <code>{overview.tmuxBinaryPath}</code></div>
+      ) : null}
 
       {error ? <div className="banner error">{error}</div> : null}
       {loading ? <div className="banner">Loading tmux sessions…</div> : null}

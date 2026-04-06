@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tmux Workspace Visualizer",
-  "version": "0.1.0",
-  "identifier": "com.ggfickle.tmux-workspace-visualizer",
+  "productName": "Loomux",
+  "version": "0.1.3",
+  "identifier": "com.ggfickle.loomux",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -12,11 +12,18 @@
   "app": {
     "windows": [
       {
-        "title": "Tmux Workspace Visualizer",
-        "width": 1080,
-        "height": 760,
+        "title": "Loomux",
+        "width": 1120,
+        "height": 780,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 20
+        },
+        "backgroundColor": "#F4F7FB"
       }
     ],
     "security": {
@@ -25,9 +32,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "DeveloperTool",
-    "shortDescription": "Visualize local tmux sessions and jump into them.",
+    "shortDescription": "Loomux is a macOS desktop app for visualizing and operating local tmux sessions.",
     "macOS": {
       "minimumSystemVersion": "12.0"
     }

@@ -7,5 +7,6 @@ export type TmuxSession = {
 export type TmuxOverview = {
   sessionCount: number;
   tmuxProcessCount: number;
+  tmuxBinaryPath: string;
   sessions: TmuxSession[];
 };

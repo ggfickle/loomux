@@ -1,9 +1,10 @@
 #[cfg(target_os = "macos")]
-pub fn open_session_in_terminal(session_name: &str) -> Result<(), String> {
+pub fn open_session_in_terminal(tmux_binary: &str, session_name: &str) -> Result<(), String> {
     use std::process::Command;
 
-    let escaped = shell_escape_single_quotes(session_name);
-    let command = format!("tmux attach -t '{}'", escaped);
+    let escaped_session = shell_escape_single_quotes(session_name);
+    let escaped_binary = shell_escape_single_quotes(tmux_binary);
+    let command = format!("'{}' attach -t '{}'", escaped_binary, escaped_session);
     let script = format!(
         "tell application \"Terminal\"\nactivate\ndo script \"{}\"\nend tell",
         applescript_escape(&command)
@@ -33,6 +34,6 @@ fn applescript_escape(value: &str) -> String {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn open_session_in_terminal(_session_name: &str) -> Result<(), String> {
+pub fn open_session_in_terminal(_tmux_binary: &str, _session_name: &str) -> Result<(), String> {
     Err("Opening a tmux session from the desktop app is only supported on macOS. Session listing still works on Linux.".to_string())
 }
