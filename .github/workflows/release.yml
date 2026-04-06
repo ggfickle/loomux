@@ -38,7 +38,7 @@ jobs:
         run: npm ci
 
       - name: Build app and upload release assets
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
