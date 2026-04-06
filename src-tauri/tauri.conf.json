@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tmux Workspace Visualizer",
+  "version": "0.1.0",
+  "identifier": "com.ggfickle.tmux-workspace-visualizer",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Tmux Workspace Visualizer",
+        "width": 1080,
+        "height": 760,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "DeveloperTool",
+    "shortDescription": "Visualize local tmux sessions and jump into them.",
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}
