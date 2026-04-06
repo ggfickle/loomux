@@ -109,6 +109,28 @@ Expected output location:
 src-tauri/target/release/bundle/dmg/
 ```
 
+## Automated GitHub Release
+
+This repo can publish the macOS DMG from GitHub Actions instead of building on a local machine.
+
+### Trigger a release
+
+Push a version tag that starts with `v`, for example:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+That triggers `.github/workflows/release.yml` on `macos-latest`, runs the Tauri build, and uploads the generated `.app` and `.dmg` files to the matching GitHub Release.
+
+### Notes
+
+- The workflow uses the default `GITHUB_TOKEN`, so no extra GitHub secret is required for an unsigned release.
+- The workflow currently builds the Apple Silicon macOS target: `aarch64-apple-darwin`.
+- Keep the pushed tag aligned with the app version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`.
+- For signed and notarized releases later, add the Apple certificate and notarization secrets to the workflow.
+
 ## Linux limitations
 
 These parts cannot be fully finished or validated on this Linux host:

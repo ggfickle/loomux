@@ -1,0 +1,57 @@
+name: Release macOS DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-macos-dmg:
+    name: Build and Release DMG
+    runs-on: macos-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build app and upload release assets
+        uses: tauri-apps/tauri-action@v1
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: |
+            Automated macOS DMG release built by GitHub Actions.
+
+            Trigger:
+            - Push a version tag like `v0.1.1`
+
+            Included assets:
+            - macOS `.app`
+            - macOS `.dmg`
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          args: --target aarch64-apple-darwin
