@@ -25,7 +25,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -85,6 +86,7 @@ button {
 }
 
 .summary-card,
+.settings-panel,
 .create-panel,
 .session-card,
 .empty-state,
@@ -110,6 +112,7 @@ button {
   font-size: 2rem;
 }
 
+.settings-panel,
 .create-panel,
 .banner,
 .empty-state {
@@ -118,14 +121,17 @@ button {
   margin-bottom: 20px;
 }
 
+.settings-panel h2,
 .create-panel h2,
 .empty-state h2 {
   margin: 0 0 6px;
   font-size: 1.15rem;
 }
 
+.settings-panel p,
 .create-panel p,
-.empty-state p {
+.empty-state p,
+.helper-text {
   margin: 0;
   color: #5f6f94;
 }
@@ -136,20 +142,34 @@ button {
 }
 
 .create-form,
-.rename-form {
+.rename-form,
+.settings-form {
   display: flex;
   gap: 12px;
   align-items: center;
 }
 
-.create-form {
+.create-form,
+.settings-form {
   margin-top: 16px;
 }
 
-.rename-form {
+.rename-form,
+.settings-form {
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   width: 100%;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.select-input {
+  appearance: none;
 }
 
 .text-input {
@@ -173,6 +193,26 @@ button {
   color: #5f6f94;
   font-size: 0.92rem;
   font-weight: 600;
+}
+
+.helper-text {
+  font-size: 0.95rem;
+}
+
+.helper-block {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(247, 249, 252, 0.78);
+}
+
+.helper-block code {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(63, 94, 251, 0.08);
 }
 
 .session-list {
@@ -270,7 +310,9 @@ button {
 }
 
 .primary-button:disabled,
-.secondary-button:disabled {
+.secondary-button:disabled,
+.select-input:disabled,
+.text-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;

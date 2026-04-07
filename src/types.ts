@@ -14,3 +14,10 @@ export type TmuxOverview = {
   debugNotes: string[];
   sessions: TmuxSession[];
 };
+
+export type TerminalPreference = "auto" | "terminal" | "iterm" | "ghostty" | "tabby" | "custom";
+
+export type TerminalSettings = {
+  preferredTerminal: TerminalPreference;
+  customCommand: string;
+};

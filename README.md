@@ -1,25 +1,73 @@
 # Loomux
 
-A lightweight Tauri desktop app for viewing and managing local tmux sessions on macOS, now with a menu bar dropdown for quick attach.
+A lightweight Tauri desktop app for viewing and managing local tmux sessions on macOS, with a menu bar dropdown and a configurable terminal launcher.
 
 ## What Loomux does
 
 - Lists local tmux sessions
 - Creates, renames, and deletes tmux sessions
-- Opens a selected session in macOS Terminal.app and attaches directly
+- Opens a selected session in your preferred terminal on macOS
 - Adds a macOS menu bar / tray dropdown that shows sessions without opening the full window
-- Keeps the main window available for fuller management and debugging
+- Keeps the main window available for fuller management and tmux detection debugging
+
+## Terminal preference
+
+Loomux now has a simple in-app **Terminal preference** section.
+
+Supported options:
+
+- **Auto**
+- **Terminal**
+- **iTerm**
+- **Ghostty**
+- **Tabby**
+- **Custom command**
+
+### Current behavior
+
+- **Auto** currently prefers installed terminals in this order:
+  1. Ghostty
+  2. iTerm
+  3. Tabby
+  4. Terminal
+- **Terminal** uses the existing AppleScript Terminal.app flow.
+- **iTerm** uses iTerm's AppleScript support.
+- **Ghostty** launches Ghostty's app executable and runs `tmux attach` through `-e /bin/zsh -lc ...`.
+- **Tabby** launches Tabby's app executable and uses its `run` CLI mode.
+- **Custom command** runs your own shell command template.
+
+The saved preference is used by:
+
+- the main window **Open session** button
+- the menu bar / tray session items
+
+### Custom command placeholders
+
+When using **Custom command**, these placeholders are supported:
+
+- `{{command}}` → full `tmux attach` command
+- `{{tmux_binary}}` → quoted tmux binary path
+- `{{socket_arg}}` → quoted `-S ...` argument when a socket is known
+- `{{session_name}}` → quoted session name
+
+Example:
+
+```bash
+open -na Ghostty --args -e /bin/zsh -lc "{{command}}"
+```
+
+If no placeholder is present, Loomux appends the full attach command to the end of your custom command.
 
 ## Menu bar mode
 
-Loomux now creates a tray / menu bar item.
+Loomux creates a tray / menu bar item.
 
 From the menu bar you can:
 
 - open the main Loomux window
 - refresh the tmux session list
 - see detected tmux sessions directly in the dropdown
-- click a session to launch Terminal.app and run `tmux attach -t <session>`
+- click a session to launch your saved terminal preference and attach to it
 - quit Loomux
 
 Notes:
@@ -30,7 +78,7 @@ Notes:
 
 ## macOS tmux detection improvements
 
-The main bug reported by the user was: tmux sessions really existed in Terminal, but Loomux showed an empty list after installing / launching from Finder.
+The main bug reported earlier was: tmux sessions really existed in Terminal, but Loomux showed an empty list after installing / launching from Finder.
 
 ### Likely root cause
 
@@ -47,7 +95,7 @@ That especially affects tmux in two ways:
    - A Finder-launched app may miss that env var, so plain `tmux list-sessions` talks to the wrong socket and returns empty / no-server.
    - In that case the app can even create a new tmux server while still not seeing the user's real sessions.
 
-### What Loomux now does
+### What Loomux does now
 
 Loomux keeps the binary path detection and adds more robust session probing:
 
@@ -75,13 +123,50 @@ Loomux keeps the binary path detection and adds more robust session probing:
 
 ### UI debugging help
 
-The main window now shows:
+The main window shows:
 
 - resolved tmux binary path
 - chosen session probe / socket source
 - debug notes when detection had to scan alternate sockets or login-shell env
 
-That makes Finder-vs-Terminal mismatches much easier to diagnose.
+## macOS icon packaging status
+
+To reduce the odds of the installed app showing a blank icon, Loomux now bundles a fuller Tauri/macOS icon set instead of relying on one PNG alone.
+
+### What changed
+
+- Added generated multi-size icon assets under `src-tauri/icons/`
+- Added a bundled macOS `.icns` file
+- Updated `src-tauri/tauri.conf.json` to explicitly point Tauri at:
+  - `icons/32x32.png`
+  - `icons/128x128.png`
+  - `icons/128x128@2x.png`
+  - `icons/icon.icns`
+  - `icons/icon.ico`
+- Added a reproducible icon generation command:
+
+```bash
+npm run icons
+```
+
+which runs:
+
+```bash
+tauri icon src-tauri/icons/icon-source.png -o src-tauri/icons
+```
+
+### Important limitation
+
+This is still a **best-effort packaging fix from Linux**.
+
+It should make the bundle structure more correct for macOS, but blank-icon behavior can still depend on:
+
+- Finder icon cache state
+- how the `.app` was built and copied into `/Applications`
+- Gatekeeper / quarantine behavior
+- the quality and size of the original source art
+
+The current source art is still based on a 512×512 PNG, so a higher-resolution or vector source would be a worthwhile future improvement.
 
 ## Project layout
 
@@ -91,7 +176,7 @@ That makes Finder-vs-Terminal mismatches much easier to diagnose.
 
 ## Run on Linux
 
-This Linux host can validate most logic, but not the real macOS Terminal / menu bar behavior.
+This Linux host can validate most logic, but not the real macOS terminal-launching or Finder icon behavior.
 
 ### Prerequisites
 
@@ -123,8 +208,9 @@ On Linux:
 
 - tmux session discovery works
 - create / rename / delete flows work
-- the tray plumbing builds
-- **Open in Terminal** still returns an unsupported-platform error because Terminal.app automation is macOS-only
+- terminal preference UI loads and saves
+- tray plumbing builds
+- **Open session** still returns an unsupported-platform error because macOS terminal launching is the only supported desktop-launch path right now
 
 ## Build the frontend
 
@@ -150,6 +236,12 @@ A real macOS machine is required for final validation.
 ```bash
 npm install
 npm run tauri dev
+```
+
+### Rebuild icon assets
+
+```bash
+npm run icons
 ```
 
 ### Build the `.app` and `.dmg`
@@ -202,11 +294,6 @@ xattr -l /Applications/Loomux.app
 
 If you see `com.apple.quarantine`, remove it with the command above.
 
-### Notes
-
-- Right-click → **Open** may also help in some cases, but the `xattr -dr ...` command is the most direct fix.
-- A future signed + notarized release should remove this manual step, but for now users should expect to do it once after install.
-
 ## Validation checklist
 
 ### Verified on this Linux host
@@ -215,7 +302,8 @@ If you see `com.apple.quarantine`, remove it with the command above.
 - `cargo check`
 - `cargo test`
 - tray feature compiles with Tauri `tray-icon`
-- structured tmux parser and `tmux ls` fallback parser unit tests pass
+- tmux parser unit tests pass
+- terminal-preference persistence and Rust command wiring compile on Linux
 
 ### Important note about Rust on this host
 
@@ -230,22 +318,27 @@ PATH="$HOME/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin:$PATH" cargo
 ### Still requires macOS validation
 
 - Finder-launched `.app` sees existing real tmux sessions
-- menu bar dropdown updates correctly against the user's tmux setup
-- clicking a session opens Terminal.app and attaches to the correct socket/session
-- closing the main window leaves the menu bar mode alive as expected
-- `.app` / `.dmg` bundling and first-run automation permissions
+- Auto terminal choice behaves as expected on a real Mac
+- Terminal / iTerm / Ghostty / Tabby launch flows work against real installed apps
+- custom command templates behave as expected with real user commands
+- menu bar dropdown uses the saved terminal preference correctly
+- `.app` / `.dmg` icon appearance after install into `/Applications`
+- whether Finder still shows a blank icon in any install/cache edge cases
+- first-run automation / permission prompts
 
 ## Risks / limitations
 
 - Loomux currently picks the strongest detected tmux target (typically the socket with the real sessions) rather than merging every possible tmux server into one UI.
 - If a user intentionally runs multiple independent tmux socket trees, Loomux prefers the most relevant detected one.
-- Terminal automation on macOS still depends on AppleScript / permission prompts.
-- Final UX needs a real macOS smoke test after packaging.
+- Ghostty and Tabby launch paths are implemented from their app CLI entry points, but still need real macOS smoke testing.
+- Custom commands are intentionally simple string templates, not a full scripting UI.
+- Final icon and terminal UX still needs a real macOS packaging pass.
 
 ## Rollout
 
 1. Validate on Linux for build/test sanity.
 2. Move to a macOS machine.
 3. Launch from Finder and confirm the existing tmux sessions appear.
-4. Confirm the menu bar dropdown shows sessions and attaches correctly.
-5. Build the `.app` / `.dmg` and smoke test the installed app.
+4. Confirm the terminal preference setting works for each desired terminal.
+5. Confirm the menu bar dropdown opens sessions using that same preference.
+6. Build the `.app` / `.dmg` and smoke test the installed app, including icon appearance.

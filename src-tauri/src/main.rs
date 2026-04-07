@@ -1,6 +1,8 @@
 mod macos;
+mod settings;
 mod tmux;
 
+use settings::TerminalSettings;
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime, WindowEvent};
@@ -12,6 +14,7 @@ const MENU_REFRESH: &str = "tray.refresh";
 const MENU_QUIT: &str = "tray.quit";
 const MENU_EMPTY: &str = "tray.empty";
 const MENU_STATUS: &str = "tray.status";
+const MENU_OPEN_WITH: &str = "tray.open-with";
 const MENU_ERROR: &str = "tray.error";
 const MENU_SESSION_PREFIX: &str = "tray.session.";
 
@@ -20,6 +23,18 @@ fn get_tmux_overview(app: AppHandle) -> Result<TmuxOverview, String> {
     let overview = tmux::get_overview()?;
     let _ = refresh_tray_menu(&app, Some(&overview));
     Ok(overview)
+}
+
+#[tauri::command]
+fn get_terminal_settings(app: AppHandle) -> Result<TerminalSettings, String> {
+    settings::load(&app)
+}
+
+#[tauri::command]
+fn update_terminal_settings(app: AppHandle, settings: TerminalSettings) -> Result<TerminalSettings, String> {
+    let settings = settings::save(&app, settings)?;
+    let _ = refresh_tray_menu(&app, None);
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -67,7 +82,9 @@ fn open_tmux_session_impl(
     socket_path: Option<&str>,
 ) -> Result<(), String> {
     let (tmux_binary, target) = tmux::tmux_command_target_for_session(session_name, socket_path)?;
+    let terminal_settings = settings::load(app).unwrap_or_default();
     let result = macos::open_session_in_terminal(
+        &terminal_settings,
         &tmux_binary,
         session_name,
         target.socket_path.as_deref(),
@@ -114,6 +131,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_tmux_overview,
+            get_terminal_settings,
+            update_terminal_settings,
             create_tmux_session,
             rename_tmux_session,
             delete_tmux_session,
@@ -178,16 +197,23 @@ fn build_tray_menu<R: Runtime>(
         .text(MENU_REFRESH, "Refresh Sessions")
         .separator();
 
+    let terminal_settings = settings::load(app).unwrap_or_default();
+    let open_with = MenuItemBuilder::with_id(
+        MENU_OPEN_WITH,
+        format!("Open with: {}", terminal_settings.preferred_terminal_label()),
+    )
+    .enabled(false)
+    .build(app)
+    .map_err(|error| format!("failed to build tray terminal item: {error}"))?;
+    builder = builder.item(&open_with).separator();
+
     match overview {
         Some(overview) if !overview.sessions.is_empty() => {
             if let Some(socket_path) = &overview.primary_socket_path {
-                let status = MenuItemBuilder::with_id(
-                    MENU_STATUS,
-                    format!("Socket: {socket_path}"),
-                )
-                .enabled(false)
-                .build(app)
-                .map_err(|error| format!("failed to build tray status item: {error}"))?;
+                let status = MenuItemBuilder::with_id(MENU_STATUS, format!("Socket: {socket_path}"))
+                    .enabled(false)
+                    .build(app)
+                    .map_err(|error| format!("failed to build tray status item: {error}"))?;
                 builder = builder.item(&status).separator();
             }
 
