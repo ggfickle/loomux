@@ -12,6 +12,9 @@ const emptyOverview: TmuxOverview = {
   sessionCount: 0,
   tmuxProcessCount: 0,
   tmuxBinaryPath: "",
+  primarySocketPath: null,
+  sessionDetection: "",
+  debugNotes: [],
   sessions: [],
 };
 
@@ -77,12 +80,12 @@ export default function App() {
     [createName, loadOverview],
   );
 
-  const openSession = useCallback(async (sessionName: string) => {
+  const openSession = useCallback(async (sessionName: string, socketPath?: string | null) => {
     setOpeningSession(sessionName);
     setError(null);
 
     try {
-      await openTmuxSession(sessionName);
+      await openTmuxSession(sessionName, socketPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to open tmux session.");
     } finally {
@@ -102,7 +105,11 @@ export default function App() {
   }, []);
 
   const saveRename = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>, currentName: string) => {
+    async (
+      event: React.FormEvent<HTMLFormElement>,
+      currentName: string,
+      socketPath?: string | null,
+    ) => {
       event.preventDefault();
 
       const nextName = renameValue.trim();
@@ -114,7 +121,7 @@ export default function App() {
       setError(null);
 
       try {
-        await renameTmuxSession(currentName, nextName);
+        await renameTmuxSession(currentName, nextName, socketPath);
         setRenamingSession(null);
         setRenameValue("");
         await loadOverview("refresh");
@@ -128,7 +135,7 @@ export default function App() {
   );
 
   const removeSession = useCallback(
-    async (sessionName: string) => {
+    async (sessionName: string, socketPath?: string | null) => {
       if (!window.confirm(`Delete tmux session "${sessionName}"?`)) {
         return;
       }
@@ -137,7 +144,7 @@ export default function App() {
       setError(null);
 
       try {
-        await deleteTmuxSession(sessionName);
+        await deleteTmuxSession(sessionName, socketPath);
         if (renamingSession === sessionName) {
           setRenamingSession(null);
           setRenameValue("");
@@ -168,7 +175,7 @@ export default function App() {
           <p className="eyebrow">Loomux</p>
           <h1>Manage local tmux sessions from a cleaner macOS desktop view.</h1>
           <p className="subtitle">
-            Create, rename, delete, refresh, and open tmux sessions in a cleaner native-feeling macOS app.
+            Main window + menu bar mode for creating, opening, renaming, deleting, and debugging tmux session detection.
           </p>
         </div>
         <button
@@ -192,7 +199,7 @@ export default function App() {
       <section className="create-panel">
         <div>
           <h2>Create a tmux session</h2>
-          <p>New sessions start detached so you can open them when you are ready.</p>
+          <p>New sessions start detached. Loomux now prefers the detected active tmux socket on macOS.</p>
         </div>
         <form className="create-form" onSubmit={createSession}>
           <input
@@ -210,7 +217,15 @@ export default function App() {
       </section>
 
       {!loading && overview.tmuxBinaryPath ? (
-        <div className="banner">Resolved tmux binary: <code>{overview.tmuxBinaryPath}</code></div>
+        <div className="banner">
+          Resolved tmux binary: <code>{overview.tmuxBinaryPath}</code>
+        </div>
+      ) : null}
+
+      {!loading && overview.sessionDetection ? (
+        <div className="banner">
+          Session probe: <code>{overview.sessionDetection}</code>
+        </div>
       ) : null}
 
       {error ? <div className="banner error">{error}</div> : null}
@@ -220,10 +235,28 @@ export default function App() {
         <section className="empty-state">
           <h2>No tmux sessions detected</h2>
           <p>
-            Create one above or start tmux elsewhere and refresh. On Linux, session management works.
-            Opening a session from the app stays macOS-only.
+            Refresh after starting tmux elsewhere, or use the create box above. On macOS, Loomux now scans common tmux
+            sockets and login-shell TMUX_TMPDIR values used by Finder-launched apps.
           </p>
+          {overview.debugNotes.length > 0 ? (
+            <ul style={{ marginTop: 16, textAlign: "left" }}>
+              {overview.debugNotes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          ) : null}
         </section>
+      ) : null}
+
+      {!loading && overview.debugNotes.length > 0 && overview.sessions.length > 0 ? (
+        <details className="banner" style={{ cursor: "pointer" }}>
+          <summary>Detection notes</summary>
+          <ul style={{ marginTop: 12, paddingLeft: 18 }}>
+            {overview.debugNotes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </details>
       ) : null}
 
       {!loading && overview.sessions.length > 0 ? (
@@ -236,10 +269,13 @@ export default function App() {
             const renameDisabled = !renameValue.trim() || renameValue.trim() === session.name;
 
             return (
-              <article className="session-card" key={session.name}>
+              <article className="session-card" key={`${session.socketPath ?? "default"}:${session.name}`}>
                 <div className="session-main">
                   {isRenaming ? (
-                    <form className="rename-form" onSubmit={(event) => void saveRename(event, session.name)}>
+                    <form
+                      className="rename-form"
+                      onSubmit={(event) => void saveRename(event, session.name, session.socketPath)}
+                    >
                       <label className="field-label" htmlFor={`rename-${session.name}`}>
                         Rename session
                       </label>
@@ -278,7 +314,14 @@ export default function App() {
                           {session.attached ? "Attached" : "Detached"}
                         </span>
                       </div>
-                      <p>{session.windows} window{session.windows === 1 ? "" : "s"}</p>
+                      <p>
+                        {session.windows} window{session.windows === 1 ? "" : "s"}
+                        {session.socketPath ? (
+                          <>
+                            {" "}· socket <code>{session.socketPath}</code>
+                          </>
+                        ) : null}
+                      </p>
                     </>
                   )}
                 </div>
@@ -287,7 +330,7 @@ export default function App() {
                   <div className="session-actions">
                     <button
                       className="primary-button"
-                      onClick={() => void openSession(session.name)}
+                      onClick={() => void openSession(session.name, session.socketPath)}
                       disabled={isOpening || isDeleting}
                     >
                       {isOpening ? "Opening…" : "Open in Terminal"}
@@ -301,7 +344,7 @@ export default function App() {
                     </button>
                     <button
                       className="secondary-button danger-button"
-                      onClick={() => void removeSession(session.name)}
+                      onClick={() => void removeSession(session.name, session.socketPath)}
                       disabled={isOpening || isDeleting}
                     >
                       {isDeleting ? "Deleting…" : "Delete"}

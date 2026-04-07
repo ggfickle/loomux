@@ -1,31 +1,87 @@
 # Loomux
 
-A lightweight Tauri desktop app for viewing and managing local tmux sessions, with macOS Terminal.app opening support.
+A lightweight Tauri desktop app for viewing and managing local tmux sessions on macOS, now with a menu bar dropdown for quick attach.
 
-## Chosen stack
+## What Loomux does
 
-- **Tauri v2** for the desktop shell and macOS packaging path
-- **React + TypeScript + Vite** for a small maintainable UI
-- **Rust** for local process execution (`tmux`, `pgrep`, `ps`, `osascript`)
+- Lists local tmux sessions
+- Creates, renames, and deletes tmux sessions
+- Opens a selected session in macOS Terminal.app and attaches directly
+- Adds a macOS menu bar / tray dropdown that shows sessions without opening the full window
+- Keeps the main window available for fuller management and debugging
 
-Why this stack:
-- lighter than Electron
-- realistic macOS app packaging story
-- simple local command integration
-- practical to scaffold on Linux while leaving macOS-only packaging for a Mac
+## Menu bar mode
 
-## Features in v1
+Loomux now creates a tray / menu bar item.
 
-- Lists current tmux sessions
-- Shows tmux session count
-- Shows tmux process count
-- Shows session names, attached state, and window count
-- Creates tmux sessions
-- Renames tmux sessions
-- Deletes tmux sessions with confirmation
-- Refreshes the session list after create, rename, and delete actions
-- Provides an **Open in Terminal** action wired for macOS
-- Configures Tauri bundle targets for `.app` and `.dmg`
+From the menu bar you can:
+
+- open the main Loomux window
+- refresh the tmux session list
+- see detected tmux sessions directly in the dropdown
+- click a session to launch Terminal.app and run `tmux attach -t <session>`
+- quit Loomux
+
+Notes:
+
+- The main window still works normally.
+- Closing the main window hides it instead of fully quitting, so the menu bar dropdown stays available.
+- Double-clicking the tray icon reopens the main window.
+
+## macOS tmux detection improvements
+
+The main bug reported by the user was: tmux sessions really existed in Terminal, but Loomux showed an empty list after installing / launching from Finder.
+
+### Likely root cause
+
+On macOS, apps launched from Finder often do **not** inherit the same shell environment as Terminal.
+
+That especially affects tmux in two ways:
+
+1. **PATH mismatch**
+   - Finder may not see Homebrew's tmux path.
+   - Loomux already handled this with common binary-path probing, and now also tries `command -v tmux` from the login shell.
+
+2. **Socket / `TMUX_TMPDIR` mismatch**
+   - Existing tmux sessions may live on a socket under a custom `TMUX_TMPDIR` or a non-default socket name.
+   - A Finder-launched app may miss that env var, so plain `tmux list-sessions` talks to the wrong socket and returns empty / no-server.
+   - In that case the app can even create a new tmux server while still not seeing the user's real sessions.
+
+### What Loomux now does
+
+Loomux keeps the binary path detection and adds more robust session probing:
+
+- checks `TMUX_BINARY_PATH`
+- checks `tmux` on current `PATH`
+- checks the login shell's `command -v tmux`
+- checks common macOS tmux install paths:
+  - `/opt/homebrew/bin/tmux`
+  - `/usr/local/bin/tmux`
+  - `/usr/bin/tmux`
+  - `/bin/tmux`
+  - `/opt/local/bin/tmux`
+- reads `TMUX_TMPDIR` from:
+  - the app process environment
+  - the login shell environment
+- scans likely tmux socket directories such as:
+  - `${TMUX_TMPDIR}/tmux-<uid>/`
+  - `/tmp/tmux-<uid>/`
+  - `/private/tmp/tmux-<uid>/`
+- tries structured session listing first:
+  - `tmux list-sessions -F "#{session_name}\t#{session_attached}\t#{session_windows}"`
+- falls back to:
+  - `tmux ls`
+- records the chosen socket path and detection notes, then surfaces them in the UI
+
+### UI debugging help
+
+The main window now shows:
+
+- resolved tmux binary path
+- chosen session probe / socket source
+- debug notes when detection had to scan alternate sockets or login-shell env
+
+That makes Finder-vs-Terminal mismatches much easier to diagnose.
 
 ## Project layout
 
@@ -35,7 +91,7 @@ Why this stack:
 
 ## Run on Linux
 
-This Linux host can scaffold and validate most of the app, but not the real macOS Terminal integration or DMG output.
+This Linux host can validate most logic, but not the real macOS Terminal / menu bar behavior.
 
 ### Prerequisites
 
@@ -63,24 +119,14 @@ npm run dev
 npm run tauri dev
 ```
 
-On Linux, tmux session listing and create/rename/delete flows work. The **Open in Terminal** action intentionally returns an unsupported-platform error because Terminal.app automation is macOS-only.
+On Linux:
 
-### tmux binary detection
+- tmux session discovery works
+- create / rename / delete flows work
+- the tray plumbing builds
+- **Open in Terminal** still returns an unsupported-platform error because Terminal.app automation is macOS-only
 
-The app now tries to find `tmux` in this order:
-
-1. `TMUX_BINARY_PATH` environment variable
-2. `tmux` from `PATH`
-3. Common macOS paths:
-   - `/opt/homebrew/bin/tmux`
-   - `/usr/local/bin/tmux`
-   - `/usr/bin/tmux`
-   - `/bin/tmux`
-   - `/opt/local/bin/tmux`
-
-This matters on macOS because GUI apps launched from Finder often do not inherit the same `PATH` as Terminal. The detected path is shown in the UI.
-
-### Build the frontend
+## Build the frontend
 
 ```bash
 npm run build
@@ -88,7 +134,7 @@ npm run build
 
 ## Build on macOS
 
-A real macOS machine is required for these steps.
+A real macOS machine is required for final validation.
 
 ### Prerequisites
 
@@ -124,53 +170,45 @@ Expected output location:
 src-tauri/target/release/bundle/dmg/
 ```
 
-## Linux limitations
-
-These parts cannot be fully finished or validated on this Linux host:
-
-1. **Terminal.app automation**
-   - The app uses `osascript` on macOS to open Terminal.app and run `tmux attach -t <session>`.
-   - That path is compiled behind a macOS target gate and cannot be exercised on Linux.
-
-2. **DMG creation**
-   - Tauri macOS bundling depends on Apple tooling and a macOS runtime.
-   - The config is in place, but the actual `.dmg` build must run on macOS.
-
-3. **macOS permission prompts**
-   - Terminal/automation permissions may prompt the user on first use.
-   - That needs a manual macOS verification pass.
-
 ## Validation checklist
 
-### What works on Linux now
+### Verified on this Linux host
 
-- Project structure and app scaffold
-- tmux session discovery logic
-- tmux create, rename, and delete logic
-- frontend UI build path
-- platform-gated open-session command behavior
+- `npm run build`
+- `cargo check`
+- `cargo test`
+- tray feature compiles with Tauri `tray-icon`
+- structured tmux parser and `tmux ls` fallback parser unit tests pass
 
-### What still requires macOS
+### Important note about Rust on this host
 
-- verifying Terminal.app launches and attaches correctly
-- building the signed or unsigned macOS `.app`
-- generating and testing the `.dmg`
+The system `cargo` here is too old for the current locked dependency set.
+Using the rustup-managed stable toolchain works:
 
-## Risks
+```bash
+PATH="$HOME/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin:$PATH" cargo check
+PATH="$HOME/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin:$PATH" cargo test
+```
 
-- tmux output can vary slightly across versions; the parser currently targets the standard fields used in `tmux list-sessions -F`.
-- If `tmux` is missing or no tmux server is running, listing returns an empty session list.
-- Create/rename/delete actions surface tmux's stderr directly, so duplicate names or missing sessions show the underlying tmux error.
-- On macOS, first-run automation permissions may affect the open-session flow.
+### Still requires macOS validation
+
+- Finder-launched `.app` sees existing real tmux sessions
+- menu bar dropdown updates correctly against the user's tmux setup
+- clicking a session opens Terminal.app and attaches to the correct socket/session
+- closing the main window leaves the menu bar mode alive as expected
+- `.app` / `.dmg` bundling and first-run automation permissions
+
+## Risks / limitations
+
+- Loomux currently picks the strongest detected tmux target (typically the socket with the real sessions) rather than merging every possible tmux server into one UI.
+- If a user intentionally runs multiple independent tmux socket trees, Loomux prefers the most relevant detected one.
+- Terminal automation on macOS still depends on AppleScript / permission prompts.
+- Final UX needs a real macOS smoke test after packaging.
 
 ## Rollout
 
-1. Validate the app on Linux for session discovery and UI behavior.
+1. Validate on Linux for build/test sanity.
 2. Move to a macOS machine.
-3. Run `npm run tauri dev` and test Terminal.app attach behavior.
-4. Run `npm run tauri build` to produce the `.app` and `.dmg`.
-5. Smoke-test the DMG-installed app against a real local tmux setup.
-
-## Rollback
-
-This is a new standalone project, so rollback is simple: revert or remove this repo directory if the scaffold is not wanted.
+3. Launch from Finder and confirm the existing tmux sessions appear.
+4. Confirm the menu bar dropdown shows sessions and attaches correctly.
+5. Build the `.app` / `.dmg` and smoke test the installed app.
