@@ -170,6 +170,43 @@ Expected output location:
 src-tauri/target/release/bundle/dmg/
 ```
 
+## Install and first open on macOS
+
+If you download a DMG or `.app` built outside the App Store and without Apple notarization, macOS may block it with a message like:
+
+- "Loomux is damaged and can’t be opened"
+- or similar Gatekeeper warnings
+
+This usually does **not** mean the app binary is actually corrupted. It usually means macOS attached a quarantine flag to the downloaded app.
+
+### Recommended install steps
+
+1. Download the latest Loomux DMG from GitHub Releases.
+2. Open the DMG.
+3. Drag `Loomux.app` into `/Applications`.
+4. In Terminal, remove the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Loomux.app
+```
+
+5. Then open Loomux from `/Applications`.
+
+### Optional checks
+
+See whether macOS attached quarantine metadata:
+
+```bash
+xattr -l /Applications/Loomux.app
+```
+
+If you see `com.apple.quarantine`, remove it with the command above.
+
+### Notes
+
+- Right-click → **Open** may also help in some cases, but the `xattr -dr ...` command is the most direct fix.
+- A future signed + notarized release should remove this manual step, but for now users should expect to do it once after install.
+
 ## Validation checklist
 
 ### Verified on this Linux host
