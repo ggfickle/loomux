@@ -1,6 +1,6 @@
-use crate::settings::TerminalSettings;
 #[cfg(target_os = "macos")]
 use crate::settings::TerminalPreference;
+use crate::settings::TerminalSettings;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,13 +22,20 @@ pub fn open_session_in_terminal(
 }
 
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
-fn build_tmux_attach_command(tmux_binary: &str, session_name: &str, socket_path: Option<&str>) -> String {
+fn build_tmux_attach_command(
+    tmux_binary: &str,
+    session_name: &str,
+    socket_path: Option<&str>,
+) -> String {
     let escaped_session = shell_escape_single_quotes(session_name);
     let escaped_binary = shell_escape_single_quotes(tmux_binary);
 
     let mut command = format!("'{}'", escaped_binary);
     if let Some(socket_path) = socket_path.map(str::trim).filter(|value| !value.is_empty()) {
-        command.push_str(&format!(" -S '{}'", shell_escape_single_quotes(socket_path)));
+        command.push_str(&format!(
+            " -S '{}'",
+            shell_escape_single_quotes(socket_path)
+        ));
     }
     command.push_str(&format!(" attach -t '{}'", escaped_session));
     command
@@ -83,7 +90,9 @@ fn open_session_impl(
         TerminalTarget::Iterm => open_in_iterm(&attach_command),
         TerminalTarget::Ghostty => open_in_ghostty(&attach_command),
         TerminalTarget::Tabby => open_in_tabby(&attach_command),
-        TerminalTarget::Custom => open_with_custom_command(settings, tmux_binary, session_name, socket_path),
+        TerminalTarget::Custom => {
+            open_with_custom_command(settings, tmux_binary, session_name, socket_path)
+        }
     }
 }
 
@@ -164,14 +173,25 @@ fn open_in_iterm(command: &str) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn open_in_ghostty(command: &str) -> Result<(), String> {
-    let executable = resolve_application_executable(&["Ghostty"])?;
-    spawn_detached(&executable, &["-e", "/bin/zsh", "-lc", command])
+    // Ghostty on macOS doesn't support CLI launching, use open command instead
+    run_osascript(&format!("tell application \"Ghostty\"\nactivate\nend tell"))?;
+
+    // Give Ghostty time to start, then send the command via AppleScript
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Use Terminal.app style command execution for Ghostty
+    let script = format!(
+        "tell application \"System Events\"\ntell process \"Ghostty\"\nkeystroke \"{}\"\nkeystroke return\nend tell\nend tell",
+        applescript_escape(command)
+    );
+    run_osascript(&script)
 }
 
 #[cfg(target_os = "macos")]
 fn open_in_tabby(command: &str) -> Result<(), String> {
     let executable = resolve_application_executable(&["Tabby"])?;
-    spawn_detached(&executable, &["run", "/bin/zsh", "-lc", command])
+    // Tabby's "run" command expects the full command as a single argument
+    spawn_detached(&executable, &["run", command])
 }
 
 #[cfg(target_os = "macos")]
@@ -183,7 +203,9 @@ fn open_with_custom_command(
 ) -> Result<(), String> {
     let template = settings.custom_command.trim();
     if template.is_empty() {
-        return Err("Custom command is empty. Add a command or choose another terminal option.".to_string());
+        return Err(
+            "Custom command is empty. Add a command or choose another terminal option.".to_string(),
+        );
     }
 
     let rendered = render_custom_command(template, tmux_binary, session_name, socket_path);
@@ -270,7 +292,11 @@ fn resolve_application_executable(app_names: &[&str]) -> Result<std::path::PathB
     if let Some(executable) = executables.iter().find(|path| {
         path.file_name()
             .and_then(|name| name.to_str())
-            .map(|name| preferred_names.iter().any(|candidate| candidate.eq_ignore_ascii_case(name)))
+            .map(|name| {
+                preferred_names
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(name))
+            })
             .unwrap_or(false)
     }) {
         return Ok(executable.clone());
@@ -311,7 +337,11 @@ mod tests {
 
     #[test]
     fn builds_attach_command_with_socket() {
-        let command = build_tmux_attach_command("/opt/homebrew/bin/tmux", "demo", Some("/tmp/tmux-1000/default"));
+        let command = build_tmux_attach_command(
+            "/opt/homebrew/bin/tmux",
+            "demo",
+            Some("/tmp/tmux-1000/default"),
+        );
         assert_eq!(
             command,
             "'/opt/homebrew/bin/tmux' -S '/tmp/tmux-1000/default' attach -t 'demo'"

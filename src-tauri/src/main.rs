@@ -3,8 +3,9 @@ mod settings;
 mod tmux;
 
 use settings::TerminalSettings;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime, WindowEvent};
 use tmux::TmuxOverview;
 
@@ -13,10 +14,18 @@ const MENU_OPEN_WINDOW: &str = "tray.open-window";
 const MENU_REFRESH: &str = "tray.refresh";
 const MENU_QUIT: &str = "tray.quit";
 const MENU_EMPTY: &str = "tray.empty";
-const MENU_STATUS: &str = "tray.status";
-const MENU_OPEN_WITH: &str = "tray.open-with";
 const MENU_ERROR: &str = "tray.error";
 const MENU_SESSION_PREFIX: &str = "tray.session.";
+
+#[derive(Debug, PartialEq, Eq)]
+enum TrayMenuEntry {
+    Item {
+        id: String,
+        text: String,
+        enabled: bool,
+    },
+    Separator,
+}
 
 #[tauri::command]
 fn get_tmux_overview(app: AppHandle) -> Result<TmuxOverview, String> {
@@ -31,7 +40,10 @@ fn get_terminal_settings(app: AppHandle) -> Result<TerminalSettings, String> {
 }
 
 #[tauri::command]
-fn update_terminal_settings(app: AppHandle, settings: TerminalSettings) -> Result<TerminalSettings, String> {
+fn update_terminal_settings(
+    app: AppHandle,
+    settings: TerminalSettings,
+) -> Result<TerminalSettings, String> {
     let settings = settings::save(&app, settings)?;
     let _ = refresh_tray_menu(&app, None);
     Ok(settings)
@@ -94,7 +106,7 @@ fn open_tmux_session_impl(
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             create_tray(app.handle())?;
             let _ = refresh_tray_menu(app.handle(), None);
@@ -138,8 +150,21 @@ fn main() {
             delete_tmux_session,
             open_tmux_session
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = event
+        {
+            if should_restore_main_window_on_reopen(has_visible_windows) {
+                let _ = show_main_window(app);
+            }
+        }
+    });
 }
 
 fn create_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
@@ -148,15 +173,15 @@ fn create_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .tooltip("Loomux")
-        .show_menu_on_left_click(true)
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::DoubleClick { .. } = event {
-                let _ = show_main_window(tray.app_handle());
-            }
-        });
+        .show_menu_on_left_click(true);
 
-    if let Some(icon) = app.default_window_icon().cloned() {
-        builder = builder.icon(icon).icon_as_template(true);
+    if let Some(icon) = tray_icon_image(app) {
+        builder = builder.icon(icon);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.icon_as_template(true);
     }
 
     builder
@@ -192,69 +217,122 @@ fn build_tray_menu<R: Runtime>(
     overview: Option<&TmuxOverview>,
     error_message: Option<&str>,
 ) -> Result<Menu<R>, String> {
-    let mut builder = MenuBuilder::new(app)
-        .text(MENU_OPEN_WINDOW, "Open Loomux")
-        .text(MENU_REFRESH, "Refresh Sessions")
-        .separator();
+    let mut builder = MenuBuilder::new(app);
 
-    let terminal_settings = settings::load(app).unwrap_or_default();
-    let open_with = MenuItemBuilder::with_id(
-        MENU_OPEN_WITH,
-        format!("Open with: {}", terminal_settings.preferred_terminal_label()),
-    )
-    .enabled(false)
-    .build(app)
-    .map_err(|error| format!("failed to build tray terminal item: {error}"))?;
-    builder = builder.item(&open_with).separator();
-
-    match overview {
-        Some(overview) if !overview.sessions.is_empty() => {
-            if let Some(socket_path) = &overview.primary_socket_path {
-                let status = MenuItemBuilder::with_id(MENU_STATUS, format!("Socket: {socket_path}"))
-                    .enabled(false)
+    for entry in tray_menu_entries(overview, error_message) {
+        match entry {
+            TrayMenuEntry::Item { id, text, enabled } => {
+                let item = MenuItemBuilder::with_id(id, text)
+                    .enabled(enabled)
                     .build(app)
-                    .map_err(|error| format!("failed to build tray status item: {error}"))?;
-                builder = builder.item(&status).separator();
+                    .map_err(|error| format!("failed to build tray menu item: {error}"))?;
+                builder = builder.item(&item);
             }
-
-            for session in &overview.sessions {
-                let label = if session.attached {
-                    format!("{} · {} windows · attached", session.name, session.windows)
-                } else {
-                    format!("{} · {} windows", session.name, session.windows)
-                };
-                builder = builder.text(format!("{MENU_SESSION_PREFIX}{}", session.name), label);
+            TrayMenuEntry::Separator => {
+                builder = builder.separator();
             }
-        }
-        Some(overview) => {
-            let empty_text = if let Some(socket_path) = &overview.primary_socket_path {
-                format!("No tmux sessions found (socket: {socket_path})")
-            } else {
-                "No tmux sessions found".to_string()
-            };
-            let item = MenuItemBuilder::with_id(MENU_EMPTY, empty_text)
-                .enabled(false)
-                .build(app)
-                .map_err(|error| format!("failed to build tray empty item: {error}"))?;
-            builder = builder.item(&item);
-        }
-        None => {
-            let item = MenuItemBuilder::with_id(
-                MENU_ERROR,
-                error_message.unwrap_or("Unable to load tmux sessions"),
-            )
-            .enabled(false)
-            .build(app)
-            .map_err(|error| format!("failed to build tray error item: {error}"))?;
-            builder = builder.item(&item);
         }
     }
 
     builder
-        .separator()
-        .text(MENU_QUIT, "Quit Loomux")
         .build()
         .map_err(|error| format!("failed to build tray menu: {error}"))
+}
+
+fn tray_menu_entries(
+    overview: Option<&TmuxOverview>,
+    error_message: Option<&str>,
+) -> Vec<TrayMenuEntry> {
+    let mut entries = vec![
+        TrayMenuEntry::Item {
+            id: MENU_OPEN_WINDOW.to_string(),
+            text: "Open Loomux".to_string(),
+            enabled: true,
+        },
+        TrayMenuEntry::Separator,
+    ];
+
+    match overview {
+        Some(overview) if !overview.sessions.is_empty() => {
+            for session in &overview.sessions {
+                entries.push(TrayMenuEntry::Item {
+                    id: format!("{MENU_SESSION_PREFIX}{}", session.name),
+                    text: session.name.clone(),
+                    enabled: true,
+                });
+            }
+        }
+        Some(_) => {
+            entries.push(TrayMenuEntry::Item {
+                id: MENU_EMPTY.to_string(),
+                text: "No tmux sessions".to_string(),
+                enabled: false,
+            });
+        }
+        None => {
+            entries.push(TrayMenuEntry::Item {
+                id: MENU_ERROR.to_string(),
+                text: error_message
+                    .unwrap_or("Unable to load tmux sessions")
+                    .to_string(),
+                enabled: false,
+            });
+        }
+    }
+
+    entries.push(TrayMenuEntry::Separator);
+    entries.push(TrayMenuEntry::Item {
+        id: MENU_REFRESH.to_string(),
+        text: "Refresh Sessions".to_string(),
+        enabled: true,
+    });
+    entries.push(TrayMenuEntry::Item {
+        id: MENU_QUIT.to_string(),
+        text: "Quit Loomux".to_string(),
+        enabled: true,
+    });
+    entries
+}
+
+#[cfg(target_os = "macos")]
+fn tray_icon_image<R: Runtime>(_app: &AppHandle<R>) -> Option<Image<'static>> {
+    Some(macos_template_tray_icon())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn tray_icon_image<R: Runtime>(app: &AppHandle<R>) -> Option<Image<'static>> {
+    app.default_window_icon().cloned()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_template_tray_icon() -> Image<'static> {
+    const SIZE: u32 = 18;
+
+    let mut rgba = vec![0; (SIZE * SIZE * 4) as usize];
+    paint_rounded_bar(&mut rgba, SIZE, 4, 6, 4, 7);
+    paint_rounded_bar(&mut rgba, SIZE, 10, 4, 4, 10);
+
+    Image::new_owned(rgba, SIZE, SIZE)
+}
+
+#[cfg(target_os = "macos")]
+fn paint_rounded_bar(rgba: &mut [u8], image_width: u32, x: u32, y: u32, width: u32, height: u32) {
+    fill_rect(rgba, image_width, x, y + 1, width, height.saturating_sub(2));
+    fill_rect(rgba, image_width, x + 1, y, width.saturating_sub(2), height);
+}
+
+#[cfg(target_os = "macos")]
+fn fill_rect(rgba: &mut [u8], image_width: u32, x: u32, y: u32, width: u32, height: u32) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    for row in y..y + height {
+        for col in x..x + width {
+            let index = ((row * image_width + col) * 4) as usize;
+            rgba[index + 3] = u8::MAX;
+        }
+    }
 }
 
 fn show_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
@@ -269,4 +347,180 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     window
         .set_focus()
         .map_err(|error| format!("failed to focus main window: {error}"))
+}
+
+fn should_restore_main_window_on_reopen(has_visible_windows: bool) -> bool {
+    !has_visible_windows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        should_restore_main_window_on_reopen, tray_menu_entries, TmuxOverview, TrayMenuEntry,
+        MENU_EMPTY, MENU_ERROR, MENU_OPEN_WINDOW, MENU_QUIT, MENU_REFRESH, MENU_SESSION_PREFIX,
+    };
+    use crate::tmux::TmuxSession;
+
+    #[test]
+    fn reopen_restores_window_when_none_are_visible() {
+        assert!(should_restore_main_window_on_reopen(false));
+    }
+
+    #[test]
+    fn reopen_skips_restore_when_a_window_is_already_visible() {
+        assert!(!should_restore_main_window_on_reopen(true));
+    }
+
+    #[test]
+    fn tray_menu_prioritizes_sessions_and_hides_diagnostics() {
+        let overview = TmuxOverview {
+            session_count: 2,
+            tmux_process_count: 1,
+            tmux_binary_path: "/opt/homebrew/bin/tmux".to_string(),
+            primary_socket_path: Some("/tmp/tmux-1000/default".to_string()),
+            session_detection: "test".to_string(),
+            debug_notes: Vec::new(),
+            sessions: vec![
+                TmuxSession {
+                    name: "alpha".to_string(),
+                    attached: false,
+                    windows: 3,
+                    socket_path: Some("/tmp/tmux-1000/default".to_string()),
+                },
+                TmuxSession {
+                    name: "beta".to_string(),
+                    attached: true,
+                    windows: 1,
+                    socket_path: Some("/tmp/tmux-1000/default".to_string()),
+                },
+            ],
+        };
+
+        assert_eq!(
+            tray_menu_entries(Some(&overview), None),
+            vec![
+                TrayMenuEntry::Item {
+                    id: MENU_OPEN_WINDOW.to_string(),
+                    text: "Open Loomux".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Item {
+                    id: format!("{MENU_SESSION_PREFIX}alpha"),
+                    text: "alpha".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Item {
+                    id: format!("{MENU_SESSION_PREFIX}beta"),
+                    text: "beta".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Item {
+                    id: MENU_REFRESH.to_string(),
+                    text: "Refresh Sessions".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Item {
+                    id: MENU_QUIT.to_string(),
+                    text: "Quit Loomux".to_string(),
+                    enabled: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tray_menu_uses_compact_empty_state() {
+        let overview = TmuxOverview {
+            session_count: 0,
+            tmux_process_count: 1,
+            tmux_binary_path: "/opt/homebrew/bin/tmux".to_string(),
+            primary_socket_path: Some("/tmp/tmux-1000/default".to_string()),
+            session_detection: "test".to_string(),
+            debug_notes: Vec::new(),
+            sessions: Vec::new(),
+        };
+
+        assert_eq!(
+            tray_menu_entries(Some(&overview), None),
+            vec![
+                TrayMenuEntry::Item {
+                    id: MENU_OPEN_WINDOW.to_string(),
+                    text: "Open Loomux".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Item {
+                    id: MENU_EMPTY.to_string(),
+                    text: "No tmux sessions".to_string(),
+                    enabled: false,
+                },
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Item {
+                    id: MENU_REFRESH.to_string(),
+                    text: "Refresh Sessions".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Item {
+                    id: MENU_QUIT.to_string(),
+                    text: "Quit Loomux".to_string(),
+                    enabled: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tray_menu_uses_compact_error_state() {
+        assert_eq!(
+            tray_menu_entries(None, Some("Loading tmux sessions…")),
+            vec![
+                TrayMenuEntry::Item {
+                    id: MENU_OPEN_WINDOW.to_string(),
+                    text: "Open Loomux".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Item {
+                    id: MENU_ERROR.to_string(),
+                    text: "Loading tmux sessions…".to_string(),
+                    enabled: false,
+                },
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Item {
+                    id: MENU_REFRESH.to_string(),
+                    text: "Refresh Sessions".to_string(),
+                    enabled: true,
+                },
+                TrayMenuEntry::Item {
+                    id: MENU_QUIT.to_string(),
+                    text: "Quit Loomux".to_string(),
+                    enabled: true,
+                },
+            ]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_tray_icon_uses_two_bars_with_transparent_background() {
+        let icon = super::macos_template_tray_icon();
+        let rgba = icon.rgba();
+
+        assert_eq!(icon.width(), 18);
+        assert_eq!(icon.height(), 18);
+        assert_eq!(alpha_at(rgba, 18, 0, 0), 0);
+        assert_eq!(alpha_at(rgba, 18, 5, 8), u8::MAX);
+        assert_eq!(alpha_at(rgba, 18, 11, 8), u8::MAX);
+        assert_eq!(alpha_at(rgba, 18, 8, 8), 0);
+        assert_eq!(alpha_at(rgba, 18, 4, 6), 0);
+        assert_eq!(alpha_at(rgba, 18, 5, 6), u8::MAX);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn alpha_at(rgba: &[u8], width: u32, x: u32, y: u32) -> u8 {
+        let index = ((y * width + x) * 4 + 3) as usize;
+        rgba[index]
+    }
 }

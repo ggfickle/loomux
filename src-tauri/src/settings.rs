@@ -50,17 +50,6 @@ impl TerminalSettings {
 
         Ok(self)
     }
-
-    pub fn preferred_terminal_label(&self) -> &'static str {
-        match self.preferred_terminal {
-            TerminalPreference::Auto => "Auto",
-            TerminalPreference::Terminal => "Terminal",
-            TerminalPreference::Iterm => "iTerm",
-            TerminalPreference::Ghostty => "Ghostty",
-            TerminalPreference::Tabby => "Tabby",
-            TerminalPreference::Custom => "Custom command",
-        }
-    }
 }
 
 pub fn load<R: Runtime>(app: &AppHandle<R>) -> Result<TerminalSettings, String> {
@@ -77,7 +66,10 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> Result<TerminalSettings, String> 
     settings.validated()
 }
 
-pub fn save<R: Runtime>(app: &AppHandle<R>, settings: TerminalSettings) -> Result<TerminalSettings, String> {
+pub fn save<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: TerminalSettings,
+) -> Result<TerminalSettings, String> {
     let settings = settings.validated()?;
     let settings_path = settings_path(app)?;
     let payload = serde_json::to_string_pretty(&settings)

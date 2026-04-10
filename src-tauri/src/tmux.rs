@@ -87,7 +87,11 @@ pub fn create_session(session_name: &str) -> Result<(), String> {
     let session_name = validate_session_name(session_name)?;
     let tmux_binary = resolve_tmux_binary()?;
     let target = resolve_primary_target(&tmux_binary)?;
-    run_tmux_command(&tmux_binary, Some(&target), &["new-session", "-d", "-s", session_name])
+    run_tmux_command(
+        &tmux_binary,
+        Some(&target),
+        &["new-session", "-d", "-s", session_name],
+    )
 }
 
 pub fn rename_session(
@@ -159,7 +163,11 @@ fn resolve_target_for_session(
     }
 
     let probe = detect_sessions(tmux_binary)?;
-    if let Some(session) = probe.sessions.iter().find(|session| session.name == session_name) {
+    if let Some(session) = probe
+        .sessions
+        .iter()
+        .find(|session| session.name == session_name)
+    {
         return Ok(ProbeCandidate {
             socket_path: session.socket_path.as_ref().map(PathBuf::from),
             source: format!("auto-resolved socket for session {session_name}"),
@@ -303,7 +311,9 @@ fn detect_sessions(tmux_binary: &str) -> Result<ProbeOutcome, String> {
         if details.is_empty() {
             Err(format!("failed to inspect tmux sessions: {error}"))
         } else {
-            Err(format!("failed to inspect tmux sessions: {error}. {details}"))
+            Err(format!(
+                "failed to inspect tmux sessions: {error}. {details}"
+            ))
         }
     } else {
         Ok(ProbeOutcome {
@@ -462,7 +472,9 @@ fn run_tmux_query(
     candidate: &ProbeCandidate,
     args: &[&str],
 ) -> Result<QueryResult, String> {
-    let output = build_tmux_command(tmux_binary, Some(candidate)).args(args).output();
+    let output = build_tmux_command(tmux_binary, Some(candidate))
+        .args(args)
+        .output();
 
     let output = match output {
         Ok(output) => output,
@@ -579,7 +591,11 @@ fn parse_legacy_session_line(line: &str, candidate: &ProbeCandidate) -> Option<T
 
 fn candidate_description(candidate: &ProbeCandidate) -> String {
     if let Some(socket_path) = &candidate.socket_path {
-        format!("{} using socket {}", candidate.source, socket_path.display())
+        format!(
+            "{} using socket {}",
+            candidate.source,
+            socket_path.display()
+        )
     } else {
         candidate.source.clone()
     }
@@ -705,7 +721,10 @@ mod tests {
         assert_eq!(session.name, "oracle");
         assert!(session.attached);
         assert_eq!(session.windows, 3);
-        assert_eq!(session.socket_path.as_deref(), Some("/tmp/tmux-1000/default"));
+        assert_eq!(
+            session.socket_path.as_deref(),
+            Some("/tmp/tmux-1000/default")
+        );
     }
 
     #[test]

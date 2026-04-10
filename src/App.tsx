@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createTmuxSession,
   deleteTmuxSession,
@@ -8,6 +8,7 @@ import {
   renameTmuxSession,
   updateTerminalSettings,
 } from "./lib/api";
+import { handleWindowDragMouseDown } from "./lib/windowDrag";
 import type { TerminalPreference, TerminalSettings, TmuxOverview } from "./types";
 
 const emptyOverview: TmuxOverview = {
@@ -71,9 +72,8 @@ export default function App() {
   const [savingRenameSession, setSavingRenameSession] = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const [terminalSettings, setTerminalSettings] = useState<TerminalSettings>(defaultTerminalSettings);
-  const [savedTerminalSettings, setSavedTerminalSettings] = useState<TerminalSettings>(defaultTerminalSettings);
   const [settingsLoading, setSettingsLoading] = useState(true);
-  const [settingsSaving, setSettingsSaving] = useState(false);
+  const autoRefreshIntervalRef = useRef<number | null>(null);
 
   const loadOverview = useCallback(async (mode: "initial" | "refresh") => {
     if (mode === "initial") {
@@ -101,7 +101,6 @@ export default function App() {
     try {
       const next = await getTerminalSettings();
       setTerminalSettings(next);
-      setSavedTerminalSettings(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load terminal settings.");
     } finally {
@@ -112,6 +111,17 @@ export default function App() {
   useEffect(() => {
     void loadOverview("initial");
     void loadTerminalPreference();
+
+    // Auto-refresh every 3 seconds
+    autoRefreshIntervalRef.current = window.setInterval(() => {
+      void loadOverview("refresh");
+    }, 3000);
+
+    return () => {
+      if (autoRefreshIntervalRef.current !== null) {
+        clearInterval(autoRefreshIntervalRef.current);
+      }
+    };
   }, [loadOverview, loadTerminalPreference]);
 
   const createSession = useCallback(
@@ -137,26 +147,6 @@ export default function App() {
       }
     },
     [createName, loadOverview],
-  );
-
-  const saveTerminalPreference = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-
-      setSettingsSaving(true);
-      setError(null);
-
-      try {
-        const saved = await updateTerminalSettings(terminalSettings);
-        setTerminalSettings(saved);
-        setSavedTerminalSettings(saved);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save terminal settings.");
-      } finally {
-        setSettingsSaving(false);
-      }
-    },
-    [terminalSettings],
   );
 
   const openSession = useCallback(async (sessionName: string, socketPath?: string | null) => {
@@ -215,10 +205,6 @@ export default function App() {
 
   const removeSession = useCallback(
     async (sessionName: string, socketPath?: string | null) => {
-      if (!window.confirm(`Delete tmux session "${sessionName}"?`)) {
-        return;
-      }
-
       setDeletingSession(sessionName);
       setError(null);
 
@@ -251,184 +237,95 @@ export default function App() {
     [terminalSettings.preferredTerminal],
   );
 
-  const terminalSettingsDirty =
-    terminalSettings.preferredTerminal !== savedTerminalSettings.preferredTerminal ||
-    terminalSettings.customCommand !== savedTerminalSettings.customCommand;
-
   return (
     <main className="app-shell">
-      <div className="window-chrome-spacer" aria-hidden="true" />
-      <section className="hero">
-        <div>
-          <p className="eyebrow">Loomux</p>
-          <h1>Manage local tmux sessions from a cleaner macOS desktop view.</h1>
-          <p className="subtitle">
-            Main window + menu bar mode for creating, opening, renaming, deleting, debugging tmux detection, and choosing which terminal Loomux should launch.
-          </p>
-        </div>
-        <button
-          className="secondary-button"
-          onClick={() => void loadOverview("refresh")}
-          disabled={loading || refreshing}
+      <div
+        className="window-chrome-spacer"
+        data-tauri-drag-region
+        aria-hidden="true"
+        onMouseDown={(event) => {
+          void handleWindowDragMouseDown(event);
+        }}
+      />
+
+      <div className="toolbar">
+        <div
+          className="toolbar-left"
+          data-tauri-drag-region
+          onMouseDown={(event) => {
+            void handleWindowDragMouseDown(event);
+          }}
         >
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
-      </section>
-
-      <section className="summary-grid">
-        {summary.map((item) => (
-          <article className="summary-card" key={item.label}>
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-          </article>
-        ))}
-      </section>
-
-      <section className="settings-panel">
-        <div>
-          <h2>Terminal preference</h2>
-          <p>
-            Loomux currently opens sessions with <strong>{activeTerminalOption.label}</strong>. This preference also applies to menu bar / tray session opens.
-          </p>
+          <h1 className="app-title">Loomux</h1>
+          <span className="session-count">{overview.sessionCount} sessions</span>
         </div>
-        <form className="settings-form" onSubmit={saveTerminalPreference}>
-          <label className="settings-field">
-            <span className="field-label">Open tmux sessions with</span>
-            <select
-              className="text-input select-input"
-              value={terminalSettings.preferredTerminal}
-              disabled={settingsLoading || settingsSaving}
-              onChange={(event) =>
-                setTerminalSettings((current) => ({
-                  ...current,
-                  preferredTerminal: event.target.value as TerminalPreference,
-                }))
-              }
-            >
-              {terminalOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <p className="helper-text">{activeTerminalOption.description}</p>
-
-          {terminalSettings.preferredTerminal === "custom" ? (
-            <label className="settings-field">
-              <span className="field-label">Custom command template</span>
-              <input
-                className="text-input"
-                type="text"
-                value={terminalSettings.customCommand}
-                disabled={settingsLoading || settingsSaving}
-                onChange={(event) =>
-                  setTerminalSettings((current) => ({
-                    ...current,
-                    customCommand: event.target.value,
-                  }))
-                }
-                placeholder='open -na Ghostty --args -e /bin/zsh -lc "{{command}}"'
-                autoComplete="off"
-              />
-            </label>
-          ) : null}
-
-          <div className="helper-block">
-            <span className="field-label">Custom placeholders</span>
-            <code>{"{{command}}"}</code>
-            <code>{"{{tmux_binary}}"}</code>
-            <code>{"{{socket_arg}}"}</code>
-            <code>{"{{session_name}}"}</code>
-          </div>
-
-          <div className="action-row">
-            <button
-              className="primary-button"
-              type="submit"
-              disabled={settingsLoading || settingsSaving || !terminalSettingsDirty}
-            >
-              {settingsSaving ? "Saving…" : terminalSettingsDirty ? "Save terminal preference" : "Saved"}
-            </button>
-            {terminalSettingsDirty ? (
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={settingsSaving}
-                onClick={() => setTerminalSettings(savedTerminalSettings)}
+        <div className="toolbar-right">
+          <div className="toolbar-controls">
+            <div className="terminal-select-shell">
+              <select
+                className="terminal-select"
+                value={terminalSettings.preferredTerminal}
+                disabled={settingsLoading}
+                onChange={(event) => {
+                  const newSettings = {
+                    ...terminalSettings,
+                    preferredTerminal: event.target.value as TerminalPreference,
+                  };
+                  setTerminalSettings(newSettings);
+                  void updateTerminalSettings(newSettings);
+                }}
+                title="Terminal preference"
               >
-                Reset
-              </button>
-            ) : null}
+                {terminalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="terminal-select-chevron" aria-hidden="true">
+                ▾
+              </span>
+            </div>
+            <button
+              className="icon-button"
+              onClick={() => void loadOverview("refresh")}
+              disabled={loading || refreshing}
+              title="Refresh sessions"
+            >
+              {refreshing ? "⟳" : "↻"}
+            </button>
           </div>
-        </form>
-      </section>
-
-      <section className="create-panel">
-        <div>
-          <h2>Create a tmux session</h2>
-          <p>New sessions start detached. Loomux keeps using the strongest detected tmux socket and your saved terminal preference when you open a session.</p>
         </div>
-        <form className="create-form" onSubmit={createSession}>
-          <input
-            className="text-input"
-            type="text"
-            value={createName}
-            onChange={(event) => setCreateName(event.target.value)}
-            placeholder="session-name"
-            autoComplete="off"
-          />
-          <button className="primary-button" type="submit" disabled={creating || !createName.trim()}>
-            {creating ? "Creating…" : "Create session"}
-          </button>
-        </form>
-      </section>
+      </div>
 
-      {!loading && overview.tmuxBinaryPath ? (
-        <div className="banner">
-          Resolved tmux binary: <code>{overview.tmuxBinaryPath}</code>
-        </div>
-      ) : null}
+      <form className="create-bar" onSubmit={createSession}>
+        <input
+          className="create-input"
+          type="text"
+          value={createName}
+          onChange={(event) => setCreateName(event.target.value)}
+          placeholder="New session name..."
+          autoComplete="off"
+        />
+        <button className="create-button" type="submit" disabled={creating || !createName.trim()}>
+          {creating ? "..." : "+"}
+        </button>
+      </form>
 
-      {!loading && overview.sessionDetection ? (
-        <div className="banner">
-          Session probe: <code>{overview.sessionDetection}</code>
-        </div>
-      ) : null}
-
-      {error ? <div className="banner error">{error}</div> : null}
-      {loading ? <div className="banner">Loading tmux sessions…</div> : null}
+      {error ? <div className="error-banner">{error}</div> : null}
+      {loading ? <div className="loading-banner">Loading...</div> : null}
 
       {!loading && overview.sessions.length === 0 ? (
-        <section className="empty-state">
-          <h2>No tmux sessions detected</h2>
-          <p>
-            Refresh after starting tmux elsewhere, or use the create box above. On macOS, Loomux scans common tmux sockets and login-shell TMUX_TMPDIR values used by Finder-launched apps.
-          </p>
-          {overview.debugNotes.length > 0 ? (
-            <ul style={{ marginTop: 16, textAlign: "left" }}>
-              {overview.debugNotes.map((note) => (
-                <li key={note}>{note}</li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-      ) : null}
-
-      {!loading && overview.debugNotes.length > 0 && overview.sessions.length > 0 ? (
-        <details className="banner" style={{ cursor: "pointer" }}>
-          <summary>Detection notes</summary>
-          <ul style={{ marginTop: 12, paddingLeft: 18 }}>
-            {overview.debugNotes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </details>
+        <div className="empty-state">
+          <p>No tmux sessions found</p>
+          <button className="link-button" onClick={() => void loadOverview("refresh")}>
+            Refresh
+          </button>
+        </div>
       ) : null}
 
       {!loading && overview.sessions.length > 0 ? (
-        <section className="session-list">
+        <div className="session-list">
           {overview.sessions.map((session) => {
             const isOpening = openingSession === session.name;
             const isRenaming = renamingSession === session.name;
@@ -437,92 +334,79 @@ export default function App() {
             const renameDisabled = !renameValue.trim() || renameValue.trim() === session.name;
 
             return (
-              <article className="session-card" key={`${session.socketPath ?? "default"}:${session.name}`}>
-                <div className="session-main">
-                  {isRenaming ? (
-                    <form
-                      className="rename-form"
-                      onSubmit={(event) => void saveRename(event, session.name, session.socketPath)}
-                    >
-                      <label className="field-label" htmlFor={`rename-${session.name}`}>
-                        Rename session
-                      </label>
-                      <input
-                        id={`rename-${session.name}`}
-                        className="text-input"
-                        type="text"
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        autoComplete="off"
-                        autoFocus
-                      />
-                      <div className="action-row">
-                        <button
-                          className="primary-button"
-                          type="submit"
-                          disabled={isSavingRename || renameDisabled}
-                        >
-                          {isSavingRename ? "Saving…" : "Save"}
-                        </button>
-                        <button
-                          className="secondary-button"
-                          type="button"
-                          onClick={cancelRename}
-                          disabled={isSavingRename}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <>
-                      <div className="session-header">
-                        <h2>{session.name}</h2>
-                        <span className={session.attached ? "pill attached" : "pill detached"}>
-                          {session.attached ? "Attached" : "Detached"}
-                        </span>
-                      </div>
-                      <p>
-                        {session.windows} window{session.windows === 1 ? "" : "s"}
-                        {session.socketPath ? (
-                          <>
-                            {" "}· socket <code>{session.socketPath}</code>
-                          </>
-                        ) : null}
-                      </p>
-                    </>
-                  )}
-                </div>
-
-                {!isRenaming ? (
-                  <div className="session-actions">
+              <div className="session-row" key={`${session.socketPath ?? "default"}:${session.name}`}>
+                {isRenaming ? (
+                  <form
+                    className="rename-form"
+                    onSubmit={(event) => void saveRename(event, session.name, session.socketPath)}
+                  >
+                    <input
+                      className="rename-input"
+                      type="text"
+                      value={renameValue}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      autoComplete="off"
+                      autoFocus
+                    />
                     <button
-                      className="primary-button"
-                      onClick={() => void openSession(session.name, session.socketPath)}
-                      disabled={isOpening || isDeleting}
+                      className="action-button save-button"
+                      type="submit"
+                      disabled={isSavingRename || renameDisabled}
+                      title="Save"
                     >
-                      {isOpening ? "Opening…" : "Open session"}
+                      ✓
                     </button>
                     <button
-                      className="secondary-button"
-                      onClick={() => startRename(session.name)}
-                      disabled={isOpening || isDeleting}
+                      className="action-button cancel-button"
+                      type="button"
+                      onClick={cancelRename}
+                      disabled={isSavingRename}
+                      title="Cancel"
                     >
-                      Rename
+                      ✕
                     </button>
-                    <button
-                      className="secondary-button danger-button"
-                      onClick={() => void removeSession(session.name, session.socketPath)}
-                      disabled={isOpening || isDeleting}
-                    >
-                      {isDeleting ? "Deleting…" : "Delete"}
-                    </button>
-                  </div>
-                ) : null}
-              </article>
+                  </form>
+                ) : (
+                  <>
+                    <div className="session-info">
+                      <span className="session-name">{session.name}</span>
+                      <span className="session-meta">
+                        {session.windows}w
+                        {session.attached ? " · attached" : ""}
+                      </span>
+                    </div>
+                    <div className="session-actions">
+                      <button
+                        className="action-button open-button"
+                        onClick={() => void openSession(session.name, session.socketPath)}
+                        disabled={isOpening || isDeleting}
+                        title="Open session"
+                      >
+                        {isOpening ? "..." : "▶"}
+                      </button>
+                      <button
+                        className="action-button rename-button"
+                        onClick={() => startRename(session.name)}
+                        disabled={isOpening || isDeleting}
+                        title="Rename"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="action-button delete-button"
+                        onClick={() => void removeSession(session.name, session.socketPath)}
+                        disabled={isOpening || isDeleting}
+                        title="Delete"
+                      >
+                        {isDeleting ? "..." : "✕"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             );
           })}
-        </section>
+        </div>
       ) : null}
     </main>
   );
